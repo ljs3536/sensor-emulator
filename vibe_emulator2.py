@@ -9,7 +9,7 @@ BROKER = '15.165.63.242'
 PORT = 1883
 
 # 🎯 핵심 변경 1: 모든 송수신 경로를 단일 토픽(VIB/{MACADDR})으로 통합
-DVIC_MAC_ADDR = "035415641615"
+DVIC_MAC_ADDR = "035415641614"
 DATA_TOPIC = f"VIB/{DVIC_MAC_ADDR}"  # VIB/035415641614 (단일 통합 토픽)
 
 # 디바이스 기본 설정값 (백업 레지스터 가정)
