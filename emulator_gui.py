@@ -27,12 +27,12 @@ class DynamicVibrationEmulatorGUI:
             "SENSORTYPE": "1",  # 0: STOP, 1: PIEZO, 2: ADXL
             "PIEZO_GAIN": "255",
             "PIEZO_SAMPLE_RATE": "25600",
-            "PIEZO_SAMPLE_COUNT": "1024",
+            "PIEZO_SAMPLE_COUNT": "8192",
             "ADXL_SAMPLE_RATE": "0x0F",
             "ADXL_SAMPLE_COUNT": "1024",
             "ADXL_G_RANGE": "2",
             "MEMS_SAMPLE_RATE": "0x0F",
-            "MEMS_SAMPLE_COUNT": "1024",
+            "MEMS_SAMPLE_COUNT": "8192",
             "MEMS_G_RANGE": "2",
             "SENSING_PERIOD": "1000"
         }
@@ -225,12 +225,12 @@ class DynamicVibrationEmulatorGUI:
                 "SENSORTYPE": self.device_config.get("SENSORTYPE", "1"),
                 "PIEZO_GAIN": self.device_config.get("PIEZO_GAIN", "255"),
                 "PIEZO_SAMPLE_RATE": self.device_config.get("PIEZO_SAMPLE_RATE", "25600"),
-                "PIEZO_SAMPLE_COUNT": self.device_config.get("PIEZO_SAMPLE_COUNT", "1024"),
+                "PIEZO_SAMPLE_COUNT": self.device_config.get("PIEZO_SAMPLE_COUNT", "8192"),
                 "ADXL_SAMPLE_RATE": self.device_config.get("ADXL_SAMPLE_RATE", "0x0F"),
                 "ADXL_SAMPLE_COUNT": self.device_config.get("ADXL_SAMPLE_COUNT", "1024"),
                 "ADXL_G_RANGE": self.device_config.get("ADXL_G_RANGE", "2"),
                 "MEMS_SAMPLE_RATE": self.device_config.get("MEMS_SAMPLE_RATE", "0x0F"),
-                "MEMS_SAMPLE_COUNT": self.device_config.get("MEMS_SAMPLE_COUNT", "1024"),
+                "MEMS_SAMPLE_COUNT": self.device_config.get("MEMS_SAMPLE_COUNT", "8192"),
                 "MEMS_G_RANGE": self.device_config.get("MEMS_G_RANGE", "2"),
                 "SENSING_PERIOD": self.device_config.get("SENSING_PERIOD", "1000")
             }
