@@ -29,7 +29,7 @@ class DynamicVibrationEmulatorGUI:
             "PIEZO_SAMPLE_RATE": "25600",
             "PIEZO_SAMPLE_COUNT": "8192",
             "ADXL_SAMPLE_RATE": "0x0F",
-            "ADXL_SAMPLE_COUNT": "1024",
+            "ADXL_SAMPLE_COUNT": "8192",
             "ADXL_G_RANGE": "2",
             "MEMS_SAMPLE_RATE": "0x0F",
             "MEMS_SAMPLE_COUNT": "8192",
