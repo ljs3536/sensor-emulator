@@ -18,7 +18,7 @@ MAC_DEFAULT = "035415641614"
 class DynamicVibrationEmulatorGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("다이나믹 진동 센서 에뮬레이터 (Spring 연동형)")
+        self.root.title("다이나믹 진동 센서 에뮬레이터 (진짜 현장 데이터 모사형)")
         self.root.geometry("780x640")
 
         # 센서 설정 상태
@@ -37,7 +37,6 @@ class DynamicVibrationEmulatorGUI:
             "SENSING_PERIOD": "1000"
         }
 
-        # MQTT 관련
         self.mqtt_client = None
         self.is_connected = False
         self.seq_frame_counter = 1
@@ -46,22 +45,51 @@ class DynamicVibrationEmulatorGUI:
 
         self._build_ui()
 
-    def generate_dynamic_hex_sensor_data(self, sample_count, base_freq=15, noise_level=120, shock_prob=0.15):
+    # 💡 핵심 업그레이드: 센서 타입과 축(Axis)에 따라 파형을 '울퉁불퉁'하고 현실적으로 생성
+    def generate_realistic_vibration(self, sample_count, base_freq, noise_level, shock_prob, dc_offset, sensor_type, axis=None):
         t = np.linspace(0, 1.0, sample_count, endpoint=False)
         
-        signal = (300 * np.sin(2 * np.pi * base_freq * t) +
-                  150 * np.sin(2 * np.pi * (base_freq * 2.5) * t) +
-                  80 * np.sin(2 * np.pi * (base_freq * 5.1) * t))
+        if sensor_type == "PIEZO":
+            # [PIEZO 특성] 고주파 배음(Harmonics)이 많고, 지글거리는 화이트 노이즈가 강력함 (울퉁불퉁한 파형)
+            signal = (100 * np.sin(2 * np.pi * base_freq * t) + 
+                      250 * np.sin(2 * np.pi * (base_freq * 7.3) * t) + 
+                      150 * np.sin(2 * np.pi * (base_freq * 13.7) * t))
+            
+            # 노이즈를 3배 강하게 주어 찌글찌글하게 만듦
+            noise = np.random.normal(0, noise_level * 3.0, sample_count)
+            
+            # 마이크로 스파이크 (날카로운 가시 파형)
+            micro_spikes = np.random.choice([0, 1, -1], size=sample_count, p=[0.97, 0.015, 0.015]) * np.random.randint(500, 1500, sample_count)
+            
+            combined = dc_offset + signal + noise + micro_spikes
 
-        noise = np.random.normal(0, noise_level, sample_count)
-        combined = signal + noise
+        else:
+            # [ADXL 특성] X, Y, Z 축마다 진폭과 위상(Phase)이 완전히 다름
+            phase_shift = random.uniform(0, 2 * np.pi)
+            
+            if axis == "X":
+                signal = 120 * np.sin(2 * np.pi * base_freq * t + phase_shift)
+                noise = np.random.normal(0, noise_level * 0.8, sample_count)
+            elif axis == "Y":
+                signal = 90 * np.sin(2 * np.pi * (base_freq * 1.2) * t + phase_shift + np.pi/4)
+                noise = np.random.normal(0, noise_level * 1.1, sample_count)
+            else: # Z축 (보통 상하 진동이라 진폭이 가장 큼)
+                signal = 300 * np.sin(2 * np.pi * base_freq * t + phase_shift) + 80 * np.sin(2 * np.pi * (base_freq * 2.1) * t)
+                noise = np.random.normal(0, noise_level * 1.5, sample_count)
+                
+            combined = dc_offset + signal + noise
 
+        # 강제 충격(Shock) - 베어링 결함 등에서 발생하는 '쿵' 하는 큰 감쇠 진동
         if random.random() < shock_prob:
-            spike_idx = random.randint(0, max(1, sample_count - 50))
-            spike_len = random.randint(10, 40)
-            spike_amp = random.choice([1, -1]) * random.randint(1500, 3500)
-            combined[spike_idx:spike_idx + spike_len] += spike_amp * np.exp(-np.linspace(0, 3, spike_len))
+            spike_idx = random.randint(0, max(1, sample_count - 100))
+            spike_len = random.randint(20, 80)
+            spike_amp = random.choice([1, -1]) * random.randint(2000, 5000)
+            
+            damping = np.exp(-np.linspace(0, 5, spike_len))
+            shock_wave = spike_amp * np.sin(2 * np.pi * np.linspace(0, 3, spike_len)) * damping
+            combined[spike_idx:spike_idx + spike_len] += shock_wave
 
+        # Short 타입(-32768 ~ 32767) 클리핑 후 Hex 변환
         raw_samples = np.clip(combined, -32768, 32767).astype(int)
         hex_data_list = [f"{val & 0xFFFF:04X}" for val in raw_samples]
         return "".join(hex_data_list)
@@ -161,8 +189,6 @@ class DynamicVibrationEmulatorGUI:
         broker = self.ent_broker.get().strip()
         port = int(self.ent_port.get().strip())
         mac = self.ent_mac.get().strip()
-        
-        # 🎯 핵심 수정: 토픽 형식을 V/{MAC} 으로 통일
         topic = f"V/{mac}"
 
         try:
@@ -188,55 +214,37 @@ class DynamicVibrationEmulatorGUI:
             messagebox.showerror("오류", f"MQTT 연결 실패: {e}")
 
     def on_mqtt_message(self, client, userdata, msg, topic):
-        """Java 백엔드의 조회/변경 요청 수신 및 응답 처리"""
         try:
             payload_str = msg.payload.decode('utf-8').strip()
             req_json = json.loads(payload_str)
 
-            # 자신이 보낸 패킷 무시
             if "sensorData" in req_json or ("COMMPATH" in req_json and "gwMacAddr" in req_json):
                 return
 
             self._log(f"📩 [Command Received] Topic: {msg.topic}, Payload: {payload_str}", "CMD")
-
             mac = self.ent_mac.get().strip()
 
-            # A. Java의 CONFIG 조회 요청 ({"CONFIG":"?"})
             if req_json.get("CONFIG") == "?":
                 self._log(">>> [CONFIG Query] Java 백엔드로 현재 설정 상태 반환...", "SYS")
-
-            # B. Java의 CONFIG 변경 요청
             else:
                 self._log(">>> [CONFIG Update] 새로운 설정값 적용...", "SYS")
                 for k, v in req_json.items():
                     if k in self.device_config:
                         self.device_config[k] = str(v)
                 
-                # UI 동기화
                 self.var_sensor_type.set(self.device_config.get("SENSORTYPE", "1"))
                 self.ent_period.delete(0, "end")
                 self.ent_period.insert(0, self.device_config.get("SENSING_PERIOD", "1000"))
 
-            # C. 조회/변경 완료 후 백엔드로 현재 설정 상태 반환 패킷 전송 (Java UI 동기화용)
             res_payload = {
-                "gwMacAddr": "HALOW",
-                "dvicMacAddr": mac,
+                "gwMacAddr": "HALOW", "dvicMacAddr": mac,
                 "COMMPATH": self.device_config.get("COMMPATH", "0"),
                 "SENSORTYPE": self.device_config.get("SENSORTYPE", "1"),
-                "PIEZO_GAIN": self.device_config.get("PIEZO_GAIN", "255"),
-                "PIEZO_SAMPLE_RATE": self.device_config.get("PIEZO_SAMPLE_RATE", "25600"),
-                "PIEZO_SAMPLE_COUNT": self.device_config.get("PIEZO_SAMPLE_COUNT", "8192"),
-                "ADXL_SAMPLE_RATE": self.device_config.get("ADXL_SAMPLE_RATE", "0x0F"),
-                "ADXL_SAMPLE_COUNT": self.device_config.get("ADXL_SAMPLE_COUNT", "1024"),
-                "ADXL_G_RANGE": self.device_config.get("ADXL_G_RANGE", "2"),
-                "MEMS_SAMPLE_RATE": self.device_config.get("MEMS_SAMPLE_RATE", "0x0F"),
-                "MEMS_SAMPLE_COUNT": self.device_config.get("MEMS_SAMPLE_COUNT", "8192"),
-                "MEMS_G_RANGE": self.device_config.get("MEMS_G_RANGE", "2"),
+                "PIEZO_SAMPLE_RATE": "25600", "PIEZO_SAMPLE_COUNT": "8192",
+                "MEMS_SAMPLE_RATE": "0x0F", "MEMS_SAMPLE_COUNT": "8192",
                 "SENSING_PERIOD": self.device_config.get("SENSING_PERIOD", "1000")
             }
-            
             self.mqtt_client.publish(topic, json.dumps(res_payload))
-            self._log(f"📤 [Published Config Res] -> Topic: {topic}", "PUB_CFG")
 
         except Exception as e:
             self._log(f"명령 처리 실패: {e}", "ERR")
@@ -259,33 +267,32 @@ class DynamicVibrationEmulatorGUI:
 
             if sensor_type == "1":
                 seq_str = f"0{frame_hex}"
-                sample_count = int(self.device_config.get("PIEZO_SAMPLE_COUNT", "1024"))
-                hex_data = self.generate_dynamic_hex_sensor_data(sample_count, base_freq, noise_lvl, shock_p)
+                # 실제 데이터 기준점 모사: -32040
+                hex_data = self.generate_realistic_vibration(8192, base_freq, noise_lvl, shock_p, dc_offset=-32040, sensor_type="PIEZO")
 
                 payload = {
-                    "gwMacAddr": "HALOW", "dvicMacAddr": mac,
-                    "batteryRmin": "5", "seq": seq_str, "tick": str(int(time.time() * 1000)),
-                    "sensorData": hex_data
+                    "gwMacAddr": "HALOW", "dvicMacAddr": mac, "batteryRmin": "10", 
+                    "seq": seq_str, "samplerate": "25600", "numofsample": "8192",
+                    "tick": str(int(time.time() * 1000)), "sensorData": hex_data
                 }
                 self.mqtt_client.publish(topic, json.dumps(payload))
-                self._log(f"PUB PIEZO -> seq: {seq_str}, len: {len(hex_data)}", "PUB")
+                self._log(f"PUB REALISTIC PIEZO -> seq: {seq_str}", "PUB")
 
             elif sensor_type == "2":
-                sample_count = int(self.device_config.get("ADXL_SAMPLE_COUNT", "1024"))
-
                 for axis_idx, axis_name in enumerate(["X", "Y", "Z"], start=1):
                     seq_axis = f"{axis_idx}{frame_hex}"
-                    axis_freq = base_freq * (1.0 + axis_idx * 0.3)
-                    hex_data = self.generate_dynamic_hex_sensor_data(sample_count, axis_freq, noise_lvl, shock_p)
+                    
+                    # 실제 데이터 기준점 모사: 16384 (0x4000)
+                    hex_data = self.generate_realistic_vibration(8192, base_freq, noise_lvl, shock_p, dc_offset=16384, sensor_type="ADXL", axis=axis_name)
 
                     payload = {
-                        "gwMacAddr": "HALOW", "dvicMacAddr": mac,
-                        "batteryRmin": "5", "seq": seq_axis, "tick": str(int(time.time() * 1000)),
-                        "sensorData": hex_data
+                        "gwMacAddr": "HALOW", "dvicMacAddr": mac, "batteryRmin": "10", 
+                        "seq": seq_axis, "samplerate": "3200", "numofsample": "8192",
+                        "tick": str(int(time.time() * 1000)), "sensorData": hex_data
                     }
                     self.mqtt_client.publish(topic, json.dumps(payload))
 
-                self._log(f"PUB ADXL 3-AXIS -> frame: {frame_hex}, samples: {sample_count}", "PUB")
+                self._log(f"PUB REALISTIC ADXL 3-AXIS -> frame: {frame_hex}", "PUB")
 
             self.seq_frame_counter = 1 if self.seq_frame_counter >= 15 else self.seq_frame_counter + 1
             period_ms = int(self.device_config.get("SENSING_PERIOD", "1000"))
