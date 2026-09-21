@@ -38,37 +38,53 @@ class MultiVibrationEmulatorGUI:
     def generate_realistic_vibration(self, sample_count, base_freq, noise_level, shock_prob, dc_offset, sensor_type, axis=None):
         t = np.linspace(0, 1.0, sample_count, endpoint=False)
         
+        # 1. 진폭(Amplitude)과 배음(Harmonics)을 실제 모터 진동 수준으로 스케일 다운
         if sensor_type == "PIEZO":
-            signal = (100 * np.sin(2 * np.pi * base_freq * t) + 
-                      250 * np.sin(2 * np.pi * (base_freq * 7.3) * t) + 
-                      150 * np.sin(2 * np.pi * (base_freq * 13.7) * t))
-            noise = np.random.normal(0, noise_level * 3.0, sample_count)
-            micro_spikes = np.random.choice([0, 1, -1], size=sample_count, p=[0.97, 0.015, 0.015]) * np.random.randint(500, 1500, sample_count)
+            signal = (20 * np.sin(2 * np.pi * base_freq * t) + 
+                      10 * np.sin(2 * np.pi * (base_freq * 3.5) * t) + 
+                      5 * np.sin(2 * np.pi * (base_freq * 7.2) * t))
+            
+            # 극단적인 화이트 노이즈 억제 및 부드러운 난수 생성
+            noise = np.random.normal(0, noise_level * 0.3, sample_count)
+            # 가시 파형(Spike) 발생 확률과 강도 대폭 축소
+            micro_spikes = np.random.choice([0, 1, -1], size=sample_count, p=[0.99, 0.005, 0.005]) * (noise_level * 1.5)
+            
             combined = dc_offset + signal + noise + micro_spikes
+
         else:
             phase_shift = random.uniform(0, 2 * np.pi)
             if axis == "X":
-                signal = 120 * np.sin(2 * np.pi * base_freq * t + phase_shift)
-                noise = np.random.normal(0, noise_level * 0.8, sample_count)
+                signal = 30 * np.sin(2 * np.pi * base_freq * t + phase_shift)
+                noise = np.random.normal(0, noise_level * 0.2, sample_count)
             elif axis == "Y":
-                signal = 90 * np.sin(2 * np.pi * (base_freq * 1.2) * t + phase_shift + np.pi/4)
-                noise = np.random.normal(0, noise_level * 1.1, sample_count)
-            else:
-                signal = 300 * np.sin(2 * np.pi * base_freq * t + phase_shift) + 80 * np.sin(2 * np.pi * (base_freq * 2.1) * t)
-                noise = np.random.normal(0, noise_level * 1.5, sample_count)
+                signal = 25 * np.sin(2 * np.pi * (base_freq * 1.2) * t + phase_shift + np.pi/4)
+                noise = np.random.normal(0, noise_level * 0.25, sample_count)
+            else: # 보통 축 하중을 가장 많이 받는 Z축의 진폭을 약간 더 높게 설정
+                signal = 50 * np.sin(2 * np.pi * base_freq * t + phase_shift) + 15 * np.sin(2 * np.pi * (base_freq * 2.1) * t)
+                noise = np.random.normal(0, noise_level * 0.3, sample_count)
+                
             combined = dc_offset + signal + noise
 
+        # 2. 충격(Shock) 파형을 자연스러운 감쇠 진동(Damped Oscillation)으로 모사
         if random.random() < shock_prob:
             spike_idx = random.randint(0, max(1, sample_count - 100))
-            spike_len = random.randint(20, 80)
-            spike_amp = random.choice([1, -1]) * random.randint(2000, 5000)
-            damping = np.exp(-np.linspace(0, 5, spike_len))
-            shock_wave = spike_amp * np.sin(2 * np.pi * np.linspace(0, 3, spike_len)) * damping
+            spike_len = random.randint(20, 60)
+            # 강제 충격의 진폭을 기존 수천 단위에서 300~800 수준으로 현실화
+            spike_amp = random.choice([1, -1]) * random.randint(300, 800)
+            
+            damping = np.exp(-np.linspace(0, 4, spike_len))
+            shock_wave = spike_amp * np.sin(2 * np.pi * np.linspace(0, 2.5, spike_len)) * damping
             combined[spike_idx:spike_idx + spike_len] += shock_wave
 
-        raw_samples = np.clip(combined, -32768, 32767).astype(int)
-        return "".join([f"{val & 0xFFFF:04X}" for val in raw_samples])
+        # 3. 이동 평균(Moving Average) 필터를 거쳐 딥러닝 연산을 붕괴시키는 날카로운 픽셀 깎아내기
+        window = np.ones(3) / 3.0
+        combined = np.convolve(combined, window, mode='same')
 
+        # 4. Short 타입 클리핑 후 Hex 변환
+        raw_samples = np.clip(combined, -32768, 32767).astype(int)
+        hex_data_list = [f"{val & 0xFFFF:04X}" for val in raw_samples]
+        return "".join(hex_data_list)
+    
     # ---------------------------------------------------------
     # UI 빌드 (좌/우 분할)
     # ---------------------------------------------------------
