@@ -9,6 +9,7 @@ from tkinter import ttk, messagebox
 from paho.mqtt import client as mqtt_client
 from paho.mqtt.enums import CallbackAPIVersion
 from datetime import datetime
+import argparse
 
 # =========================================================
 # 기본 CONFIG 및 MQTT 설정
@@ -156,6 +157,12 @@ class UnifiedSensorEmulatorGUI:
         ent_mac.insert(0, f"0354156416{curr_id+9:02d}") 
         ent_mac.pack(side="left", padx=5)
 
+        # 배터리 입력 위젯 추가
+        ttk.Label(row_frame, text="배터리:").pack(side="left")
+        ent_batt = ttk.Entry(row_frame, width=4)
+        ent_batt.insert(0, "10") # 기본값 10
+        ent_batt.pack(side="left", padx=(0, 5))
+
         var_type = tk.StringVar(value=default_type)
         cb_type = ttk.Combobox(row_frame, textvariable=var_type, values=["0: STOP", "1: PIEZO", "2: ADXL", "3: ULTRASONIC"], state="readonly", width=12)
         cb_type.pack(side="left", padx=5)
@@ -181,6 +188,7 @@ class UnifiedSensorEmulatorGUI:
             "id": curr_id,
             "frame": row_frame,
             "mac_entry": ent_mac,
+            "batt_entry": ent_batt,
             "var_type": var_type,
             "dynamic_frame": dynamic_frame,
             "btn_trigger": btn_trigger,
@@ -364,7 +372,10 @@ class UnifiedSensorEmulatorGUI:
 
             current_tick = str(int(time.time() * 1000))
             ui = slot["ui_vars"]
-            
+
+            current_battery = slot["batt_entry"].get().strip()
+            if not current_battery: current_battery = "10"
+
             period_str = ui.get("period").get() if "period" in ui else "1000"
             period_ms = int(period_str) if period_str.isdigit() else 1000
 
@@ -378,7 +389,7 @@ class UnifiedSensorEmulatorGUI:
                 if stype == "1":
                     sr_str = ui.get("sr").get() if "sr" in ui else "25600"
                     hex_data = self.generate_realistic_vibration(sc_int, shock_p, -32040, "PIEZO")
-                    payload = { "gwMacAddr": "HALOW", "dvicMacAddr": mac, "batteryRmin": "10", "seq": f"0{frame_hex}", "samplerate": sr_str, "numofsample": sc_str, "tick": current_tick, "sensorData": hex_data }
+                    payload = { "gwMacAddr": "HALOW", "dvicMacAddr": mac, "batteryRmin": current_battery, "seq": f"0{frame_hex}", "samplerate": sr_str, "numofsample": sc_str, "tick": current_tick, "sensorData": hex_data }
                     slot["client"].publish(topic, json.dumps(payload))
 
                 elif stype == "2": 
@@ -388,7 +399,7 @@ class UnifiedSensorEmulatorGUI:
                     
                     for axis_idx, axis_name in enumerate(["X", "Y", "Z"], start=1):
                         hex_data = self.generate_realistic_vibration(sc_int, shock_p, 16384, "ADXL", axis_name)
-                        payload = { "gwMacAddr": "HALOW", "dvicMacAddr": mac, "batteryRmin": "10", "seq": f"{axis_idx}{frame_hex}", "samplerate": sr_str, "numofsample": sc_str, "tick": current_tick, "sensorData": hex_data }
+                        payload = { "gwMacAddr": "HALOW", "dvicMacAddr": mac, "batteryRmin": current_battery, "seq": f"{axis_idx}{frame_hex}", "samplerate": sr_str, "numofsample": sc_str, "tick": current_tick, "sensorData": hex_data }
                         slot["client"].publish(topic, json.dumps(payload))
 
                 if slot["force_shock"]: slot["force_shock"] = False
@@ -398,7 +409,7 @@ class UnifiedSensorEmulatorGUI:
             elif stype == "3":
                 topic = f"D/{mac}"
                 hex_data = self.generate_ultrasonic_hex_data(slot["is_leaking"])
-                payload = { "gwMacAddr": "HALOW", "dvicMacAddr": mac, "batteryRmin": "10", "seq": f"{slot['seq']:02X}", "tick": current_tick, "sensorData": hex_data }
+                payload = { "gwMacAddr": "HALOW", "dvicMacAddr": mac, "batteryRmin": current_battery, "seq": f"{slot['seq']:02X}", "tick": current_tick, "sensorData": hex_data }
                 slot["client"].publish(topic, json.dumps(payload))
 
                 self._log(f"PUB [#{s_id:02d}] 초음파 전송 [{'🚨 LEAK' if slot['is_leaking'] else '🟢 NORMAL'}] (Tick: {current_tick})", "PUB-ULT")
