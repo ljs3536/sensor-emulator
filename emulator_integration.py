@@ -51,38 +51,45 @@ class UnifiedSensorEmulatorGUI:
             harmonic = 150 * np.sin(2 * np.pi * (base_freq * 2) * t)
             signal = (amplitude * amp_mod * np.sin(2 * np.pi * base_freq * t)) + harmonic + noise
         else:
-            # 💡 [핵심 수정] ADXL은 축별로 진폭(Amplitude)을 확연히 다르게 설정
             if axis == "X": 
-                # X축: 주 진동 방향 (가장 큼, 고조파 포함)
                 amplitude = 2000
                 harmonic = 150 * np.sin(2 * np.pi * (base_freq * 2) * t)
                 signal = (amplitude * amp_mod * np.sin(2 * np.pi * base_freq * t)) + harmonic + noise
             elif axis == "Y": 
-                # Y축: 횡방향 보조 진동 (X축의 약 30% 수준)
                 amplitude = 600
                 harmonic = 50 * np.sin(2 * np.pi * (base_freq * 2) * t)
                 signal = (amplitude * amp_mod * np.sin(2 * np.pi * base_freq * t + np.pi/3)) + harmonic + noise
             else: 
-                # Z축: 단단히 고정된 축 (진동 거의 없음, 노이즈 위주)
                 amplitude = 50
                 signal = (amplitude * np.sin(2 * np.pi * base_freq * t + np.pi/1.5)) + (noise * 0.8)
 
-        # 사용자 충격 발생 ('⚡ 충격 발생' 버튼 클릭 시)
+        # 💡 [핵심 수정] 사용자 충격 발생 ('⚡ 충격 발생' 버튼 클릭 시)
         if random.random() < shock_prob:
-            spike_idx = random.randint(0, max(1, sample_count - 100))
-            spike_len = random.randint(20, 60)
-            
-            # 💡 충격량도 축별로 다르게 적용 (X는 크게, Z는 미미하게)
-            spike_amp_base = random.choice([1, -1]) * 8000
-            if axis == "Y": spike_amp = spike_amp_base * 0.4
-            elif axis == "Z": spike_amp = spike_amp_base * 0.05
-            else: spike_amp = spike_amp_base
-            
-            damping = np.exp(-np.linspace(0, 4, spike_len))
-            shock_wave = spike_amp * np.sin(2 * np.pi * np.linspace(0, 2.5, spike_len)) * damping
-            signal[spike_idx:spike_idx + spike_len] += shock_wave
+            # 단일 충격이 아니라 기계가 긁히는 듯한 다중 연쇄 충격 발생 (1~3회 반복)
+            num_shocks = random.randint(1, 3)
+            for _ in range(num_shocks):
+                # 1. 충격 지속 시간을 10배 이상 길게 (기존 20~60 -> 200~800)
+                spike_len = random.randint(200, 800)
+                spike_idx = random.randint(0, max(1, sample_count - spike_len))
+                
+                # 2. 충격량(진폭)을 16bit 최대 한계치(32767) 이상으로 폭증 (Clipping 왜곡 유도)
+                spike_amp_base = random.choice([1, -1]) * 40000
+                
+                # 3. Y, Z축에도 꽤 강력한 여파가 전달되도록 비율 상향
+                if axis == "Y": spike_amp = spike_amp_base * 0.8
+                elif axis == "Z": spike_amp = spike_amp_base * 0.4
+                else: spike_amp = spike_amp_base
+                
+                # 4. 감쇠 속도를 늦추고, 주파수를 훨씬 날카로운 고주파로 변경
+                damping = np.exp(-np.linspace(0, 2, spike_len))
+                shock_wave = spike_amp * np.sin(2 * np.pi * np.linspace(0, 15.0, spike_len)) * damping
+                
+                # 5. 파괴 시 발생하는 거친 백색 잡음(갈리는 소리) 대량 추가
+                impact_noise = np.random.normal(0, abs(spike_amp) * 0.3, spike_len)
+                
+                signal[spike_idx:spike_idx + spike_len] += (shock_wave + impact_noise)
 
-        # 16bit 정수로 변환 후 Hex 문자열 조립
+        # 16bit 정수로 변환 후 Hex 문자열 조립 (40000 이상의 진폭은 여기서 잘리며 거친 파형을 만듦)
         raw_samples = np.clip(signal, -32768, 32767).astype(int)
         return "".join([f"{val & 0xFFFF:04X}" for val in raw_samples])
 
