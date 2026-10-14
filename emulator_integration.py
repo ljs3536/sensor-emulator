@@ -34,39 +34,56 @@ class UnifiedSensorEmulatorGUI:
             self.add_slot(default_type=t)
 
     # ---------------------------------------------------------
-    # 데이터 생성 1: 진동 (기본값 내장)
+    # 데이터 생성 1: 진동 (자연스러운 실제 기계 모사형)
     # ---------------------------------------------------------
     def generate_realistic_vibration(self, sample_count, shock_prob, dc_offset, sensor_type, axis=None):
-        base_freq = 20
-        noise_level = 150
+        base_freq = 60  # 메인 주파수 (60Hz)
         t = np.linspace(0, 1.0, sample_count, endpoint=False)
         
+        # 1. 진폭 변조 (Amplitude Modulation)
+        amp_mod = 1.0 + 0.1 * np.sin(2 * np.pi * 2.0 * t)
+        
+        # 2. 미세 백색 잡음 (White Noise)
+        noise = np.random.normal(0, 100, sample_count)
+        
         if sensor_type == "PIEZO":
-            signal = (20 * np.sin(2 * np.pi * base_freq * t) + 
-                      10 * np.sin(2 * np.pi * (base_freq * 3.5) * t) + 
-                      5 * np.sin(2 * np.pi * (base_freq * 7.2) * t))
-            noise = np.random.normal(0, noise_level * 0.3, sample_count)
-            micro_spikes = np.random.choice([0, 1, -1], size=sample_count, p=[0.99, 0.005, 0.005]) * (noise_level * 1.5)
-            combined = dc_offset + signal + noise + micro_spikes
+            amplitude = 2000 
+            harmonic = 150 * np.sin(2 * np.pi * (base_freq * 2) * t)
+            signal = (amplitude * amp_mod * np.sin(2 * np.pi * base_freq * t)) + harmonic + noise
         else:
-            phase_shift = random.uniform(0, 2 * np.pi)
-            if axis == "X": signal = 30 * np.sin(2 * np.pi * base_freq * t + phase_shift)
-            elif axis == "Y": signal = 25 * np.sin(2 * np.pi * (base_freq * 1.2) * t + phase_shift + np.pi/4)
-            else: signal = 50 * np.sin(2 * np.pi * base_freq * t + phase_shift) + 15 * np.sin(2 * np.pi * (base_freq * 2.1) * t)
-            noise = np.random.normal(0, noise_level * 0.2, sample_count)
-            combined = dc_offset + signal + noise
+            # 💡 [핵심 수정] ADXL은 축별로 진폭(Amplitude)을 확연히 다르게 설정
+            if axis == "X": 
+                # X축: 주 진동 방향 (가장 큼, 고조파 포함)
+                amplitude = 2000
+                harmonic = 150 * np.sin(2 * np.pi * (base_freq * 2) * t)
+                signal = (amplitude * amp_mod * np.sin(2 * np.pi * base_freq * t)) + harmonic + noise
+            elif axis == "Y": 
+                # Y축: 횡방향 보조 진동 (X축의 약 30% 수준)
+                amplitude = 600
+                harmonic = 50 * np.sin(2 * np.pi * (base_freq * 2) * t)
+                signal = (amplitude * amp_mod * np.sin(2 * np.pi * base_freq * t + np.pi/3)) + harmonic + noise
+            else: 
+                # Z축: 단단히 고정된 축 (진동 거의 없음, 노이즈 위주)
+                amplitude = 50
+                signal = (amplitude * np.sin(2 * np.pi * base_freq * t + np.pi/1.5)) + (noise * 0.8)
 
+        # 사용자 충격 발생 ('⚡ 충격 발생' 버튼 클릭 시)
         if random.random() < shock_prob:
             spike_idx = random.randint(0, max(1, sample_count - 100))
             spike_len = random.randint(20, 60)
-            spike_amp = random.choice([1, -1]) * random.randint(300, 800)
+            
+            # 💡 충격량도 축별로 다르게 적용 (X는 크게, Z는 미미하게)
+            spike_amp_base = random.choice([1, -1]) * 8000
+            if axis == "Y": spike_amp = spike_amp_base * 0.4
+            elif axis == "Z": spike_amp = spike_amp_base * 0.05
+            else: spike_amp = spike_amp_base
+            
             damping = np.exp(-np.linspace(0, 4, spike_len))
             shock_wave = spike_amp * np.sin(2 * np.pi * np.linspace(0, 2.5, spike_len)) * damping
-            combined[spike_idx:spike_idx + spike_len] += shock_wave
+            signal[spike_idx:spike_idx + spike_len] += shock_wave
 
-        window = np.ones(3) / 3.0
-        combined = np.convolve(combined, window, mode='same')
-        raw_samples = np.clip(combined, -32768, 32767).astype(int)
+        # 16bit 정수로 변환 후 Hex 문자열 조립
+        raw_samples = np.clip(signal, -32768, 32767).astype(int)
         return "".join([f"{val & 0xFFFF:04X}" for val in raw_samples])
 
     # ---------------------------------------------------------
